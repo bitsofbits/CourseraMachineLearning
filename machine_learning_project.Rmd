@@ -1,0 +1,114 @@
+---
+title: "Practical Machine Learning Project"
+author: "Timothy Hochberg"
+date: "May 17, 2015"
+output: html_document
+---
+
+## Goal
+
+The goal of this project is to predict how in what manner each participant in a study is performing a dumbell lift, at a given time, based on data collected using accelerometers mounted on the belt, forearm, arm, and dumbell of each particpants. Each participant performed the lift in six different ways: one correctly and five incorrectly.
+
+## Load the Preprocess the Training Data
+
+We first load the raw training data, taking care to convert the non-numeric
+strings that appear in the data to NA.
+
+```{r}
+raw_train = read.csv("pml-training.csv", na.strings=c("NA", "#DIV/0!"))
+dim(raw_train)
+head(names(raw_train), 10)
+tail(names(raw_train), 10)
+```
+
+The specification of the  different ways of performing the lift are contained
+in the last column, labelled `classe`, and are represented by the letters `A` - `E`. The first
+seven columns contain timestamps and other non-sensor data and the remaining columns
+contain accelerometer data that can be used in the predictions
+
+We first remove the non sensor data and then examine the resulting data to see which columns
+have missing or NA values.
+
+```{r, warning=FALSE, message=FALSE}
+library(caret)
+library(randomForest)
+# Remove the non-sensor data in rows 1-7
+pruned_raw_train <- raw_train[,-(1:7)]
+number_of_missing_values <- colSums(is.na(pruned_raw_train))
+plot(number_of_missing_values)
+```
+
+Examination of `number_of_missing_values` reveals that that the columns can be separated into sets: one  
+that is missing no data, and another which is missing all, or nearly all values. So, rather than trying to
+impute any values, we simply remove the offending columns.
+
+```{r}
+has_all_data <- number_of_missing_values == 0
+train_with_no_missing = pruned_raw_train[,has_all_data]
+```
+
+We then break the data into training and validation set so that we can get
+evaluate the out of sample (OOS) error.
+
+```{r}
+set.seed(3456)
+train_index <- createDataPartition(train_with_no_missing$classe, p = .6, list=FALSE)
+
+train = train_with_no_missing[train_index,]
+valid = train_with_no_missing[-train_index,]
+```
+
+## Create a Random Forest model.
+
+We create a random forest model to predict `classe`. The data is preprocessed by
+scaling and centering the predictors and we perform 5-fold cross validation in order 
+to get an *estimate* of the error.
+
+```{r warning=FALSE, cache=TRUE}
+model<-train(classe ~ ., data=train, method="rf",
+              preProcess=c('scale','center'),
+              trControl=trainControl(method="cv", number=5))
+model$results[1,]
+```
+
+The model is then applied to the validation data to provide an estimate of the out of sample error.
+
+```{r}
+predict = predict(model, valid)
+confmatrix <-confusionMatrix(predict, valid$classe)
+confmatrix$table
+confmatrix$overall
+```
+
+The estimate of the model accuracy provided by cross-validation on the test set is 99.0%. The agrees closely 
+with the 99.2% OOS accuracy measured on the validation set. Interestingly, the OOS accuracy is slightly
+higher than the cross validation accuracy, a reversal of the typical pattern.
+
+## Summary
+
+We generated a random forest model that predicts, based on the valid accelerometer data for the participants,
+the way in which they were lifing dumbells during a given trial. The out of sample accuracy was determined to be
+99.2% based on a validation set consisting of 40% of the available data.
+
+# Appendix
+
+## Write Data for Assigments
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+# Generate and write the output files.
+
+raw_test = read.csv("pml-testing.csv", na.strings=c("NA", "#DIV/0!"))
+test = raw_test[,-(1:7)][,has_all_data] # Remove non sensor data
+answers = predict(model, test)
+
+pml_write_files(answers)
+
+```
